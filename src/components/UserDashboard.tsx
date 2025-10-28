@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LogOut, Plane, Power, StopCircle, AlertCircle, History as HistoryIcon } from 'lucide-react';
+import { LogOut, Plane, Power, StopCircle, AlertCircle } from 'lucide-react';
 import { supabase, BETRecord, ChargingLog } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import queryString from 'query-string';
@@ -11,11 +11,13 @@ interface Equipment extends BETRecord {
 export default function UserDashboard() {
   const { profile, signOut } = useAuth();
   const [selectedEquipment, setSelectedEquipment] = useState<BETRecord | null>(null);
-  const [currentLog, setCurrentLog] = useState<ChargingLog | null>(null);
+  const [currentSession, setCurrentSession] = useState<ChargingLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [logs, setLogs] = useState<ChargingLog[]>([]);
+  const [operationLoading, setOperationLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -25,14 +27,15 @@ export default function UserDashboard() {
     fetchEquipment(equipmentNo);
   }, [window.location.search]);
 
+  // Fetch equipment current session and logs when equipment changes
   useEffect(() => {
     if (selectedEquipment) {
-      fetchCurrentLog();
+      fetchCurrentSession();
       fetchLogs();
 
-      // Subscribe to charging log changes
+      // Subscribe to charging log changes for this equipment
       const channel = supabase
-        .channel('charging_logs')
+        .channel(`charging_logs_${selectedEquipment.id}`)
         .on(
           'postgres_changes',
           {
@@ -42,7 +45,7 @@ export default function UserDashboard() {
             filter: `equipment_id=eq.${selectedEquipment.id}`,
           },
           () => {
-            fetchCurrentLog();
+            fetchCurrentSession();
             fetchLogs();
           }
         )
@@ -53,8 +56,6 @@ export default function UserDashboard() {
       };
     }
   }, [selectedEquipment?.id]);
-
-  const [error, setError] = useState<string | null>(null);
 
   const fetchAllEquipment = async () => {
     try {
@@ -109,20 +110,25 @@ export default function UserDashboard() {
     }
   };
 
-  const fetchCurrentLog = async () => {
+  const fetchCurrentSession = async () => {
     if (!selectedEquipment) return;
+    
     try {
+      // Get the most recent session for this equipment where end_time is NULL
       const { data, error } = await supabase
         .from('charging_logs')
         .select('*')
         .eq('equipment_id', selectedEquipment.id)
         .is('end_time', null)
+        .order('start_time', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) throw error;
-      setCurrentLog(data);
+      setCurrentSession(data || null);
     } catch (error) {
-      console.error('Error fetching current log:', error);
+      console.error('Error fetching current session:', error);
+      setCurrentSession(null);
     }
   };
 
@@ -144,31 +150,53 @@ export default function UserDashboard() {
   };
 
   const startCharging = async () => {
-    if (!selectedEquipment || !profile) return;
-    setLoading(true);
+    if (!selectedEquipment || !profile) {
+      setError('No equipment selected or user not authenticated');
+      return;
+    }
+
+    // Check if equipment already has an active session (safety check)
+    await fetchCurrentSession();
+    if (currentSession) {
+      setError('Equipment is already charging');
+      return;
+    }
+
+    setOperationLoading(true);
     setError('');
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('charging_logs')
         .insert([{
           equipment_id: selectedEquipment.id,
           user_id: profile.id,
           location_id: selectedEquipment.location_id,
           start_time: new Date().toISOString(),
-        }]);
+        }])
+        .select()
+        .single();
 
       if (error) throw error;
+
+      // Update local state immediately
+      setCurrentSession(data);
+      
     } catch (err: any) {
+      console.error('Error starting charging:', err);
       setError(err.message || 'Failed to start charging');
     } finally {
-      setLoading(false);
+      setOperationLoading(false);
     }
   };
 
   const stopCharging = async () => {
-    if (!currentLog || !profile) return;
-    setLoading(true);
+    if (!currentSession || !profile) {
+      setError('No active charging session or user not authenticated');
+      return;
+    }
+
+    setOperationLoading(true);
     setError('');
 
     try {
@@ -177,15 +205,23 @@ export default function UserDashboard() {
         .update({
           end_time: new Date().toISOString(),
         })
-        .eq('id', currentLog.id);
+        .eq('id', currentSession.id);
 
       if (error) throw error;
+
+      // Update local state immediately
+      setCurrentSession(null);
+      
     } catch (err: any) {
+      console.error('Error stopping charging:', err);
       setError(err.message || 'Failed to stop charging');
     } finally {
-      setLoading(false);
+      setOperationLoading(false);
     }
   };
+
+  // Determine button state based on equipment's current session
+  const isEquipmentCharging = currentSession !== null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-sky-50">
@@ -239,6 +275,8 @@ export default function UserDashboard() {
                 onChange={(e) => {
                   const selected = equipment.find(eq => eq.id === e.target.value);
                   setSelectedEquipment(selected || null);
+                  setCurrentSession(null); // Reset session when equipment changes
+                  
                   // Update URL with equipment number
                   if (selected) {
                     const newUrl = queryString.stringifyUrl({
@@ -268,36 +306,28 @@ export default function UserDashboard() {
                     {selectedEquipment.equipment_id}
                   </h3>
                   <p className="text-sm text-gray-500">{selectedEquipment.equipment_type}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Status: {selectedEquipment.status}
+                  </p>
                 </div>
-                {queryString.parse(window.location.search).EquipmentNo && (
-                  <button
-                    onClick={() => {
-                      setSelectedEquipment(null);
-                      window.history.pushState({}, '', window.location.pathname);
-                    }}
-                    className="text-sm text-gray-600 hover:text-gray-900 underline"
-                  >
-                    Clear Selection
-                  </button>
-                )}
                 <div className="flex items-center gap-3">
-                  {!currentLog ? (
+                  {isEquipmentCharging ? (
                     <button
-                      onClick={startCharging}
-                      disabled={loading}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={stopCharging}
+                      disabled={operationLoading}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
-                      <Power className="w-5 h-5" />
-                      Start Charging
+                      <StopCircle className="w-5 h-5" />
+                      {operationLoading ? 'Stopping...' : 'Stop Charging'}
                     </button>
                   ) : (
                     <button
-                      onClick={stopCharging}
-                      disabled={loading}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={startCharging}
+                      disabled={operationLoading}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
-                      <StopCircle className="w-5 h-5" />
-                      Stop Charging
+                      <Power className="w-5 h-5" />
+                      {operationLoading ? 'Starting...' : 'Start Charging'}
                     </button>
                   )}
                 </div>
@@ -309,45 +339,23 @@ export default function UserDashboard() {
                 </div>
               )}
 
-              {currentLog && (
+              {currentSession && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm font-medium text-blue-900">Currently Charging</p>
-                  <p className="text-xs text-blue-700 mt-1">
-                    Started: {new Date(currentLog.start_time).toLocaleString()}
-                  </p>
-                </div>
-              )}
-
-              {logs.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                    <HistoryIcon className="w-4 h-4" />
-                    Recent Charging History
-                  </h4>
-                  <div className="space-y-3">
-                    {logs.map(log => (
-                      <div
-                        key={log.id}
-                        className="text-sm border border-gray-100 rounded-lg p-3 hover:bg-gray-50"
-                      >
-                        <div className="flex items-center justify-between">
-                          <p className="font-medium text-gray-900">
-                            Duration: {log.duration_minutes ? `${Math.round(log.duration_minutes)} minutes` : 'In Progress'}
-                          </p>
-                          <p className="text-gray-500">
-                            {new Date(log.start_time).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className="mt-2 text-xs text-gray-500 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span>Start: {new Date(log.start_time).toLocaleTimeString()}</span>
-                            {log.end_time && (
-                              <span>End: {new Date(log.end_time).toLocaleTimeString()}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-blue-900">Currently Charging</p>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Started: {new Date(currentSession.start_time).toLocaleString()}
+                      </p>
+                      {currentSession.user_id && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Started by: {currentSession.user_id === profile?.id ? 'You' : 'Another user'}
+                        </p>
+                      )}
+                    </div>
+                    <div className="animate-pulse">
+                      <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                    </div>
                   </div>
                 </div>
               )}

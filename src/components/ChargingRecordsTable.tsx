@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, ChargingLog, Location } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, MapPin, Clock } from 'lucide-react';
+import { Search, MapPin, Clock, Download } from 'lucide-react';
 
 interface ChargingRecordsTableProps {
   locations: Location[];
@@ -14,13 +14,16 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
     equipment: { equipment_id: string; equipment_type: string; }
   })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'completed' | 'all'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     fetchChargingLogs();
-  }, [selectedLocation, statusFilter]);
+  }, [selectedLocation, statusFilter, startDate, endDate]);
 
   const fetchChargingLogs = async () => {
     setLoading(true);
@@ -46,6 +49,14 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
         query = query.is('end_time', null);
       } else if (statusFilter === 'completed') {
         query = query.not('end_time', 'is', null);
+      }
+
+      // Apply date filters based on created_at
+      if (startDate) {
+        query = query.gte('created_at', `${startDate}T00:00:00`);
+      }
+      if (endDate) {
+        query = query.lte('created_at', `${endDate}T23:59:59`);
       }
 
       const { data, error } = await query;
@@ -83,55 +94,217 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
     return matchesSearch;
   });
 
+  const downloadCSV = async () => {
+    setDownloading(true);
+    try {
+      // Fetch data for download (same filters as display)
+      let query = supabase
+        .from('charging_logs')
+        .select(`
+          *,
+          user_profile:user_profiles(full_name),
+          equipment:bet_records(equipment_id, equipment_type)
+        `)
+        .order('created_at', { ascending: false });
+
+      // Apply same filters
+      if (profile?.role === 'admin') {
+        query = query.eq('location_id', profile.location_id);
+      } else if (selectedLocation !== 'all') {
+        query = query.eq('location_id', selectedLocation);
+      }
+
+      if (statusFilter === 'active') {
+        query = query.is('end_time', null);
+      } else if (statusFilter === 'completed') {
+        query = query.not('end_time', 'is', null);
+      }
+
+      if (startDate) {
+        query = query.gte('created_at', `${startDate}T00:00:00`);
+      }
+      if (endDate) {
+        query = query.lte('created_at', `${endDate}T23:59:59`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        alert('No data to download');
+        return;
+      }
+
+      // Create CSV content
+      const headers = [
+        'Log ID',
+        'Equipment ID',
+        'Equipment Type',
+        'User Name',
+        'Location',
+        'Start Time',
+        'End Time',
+        'Duration (minutes)',
+        'Status',
+        'Created At'
+      ];
+
+      const csvRows = [headers.join(',')];
+
+      data.forEach(log => {
+        const duration = log.end_time 
+          ? Math.floor((new Date(log.end_time).getTime() - new Date(log.start_time).getTime()) / (1000 * 60))
+          : Math.floor((new Date().getTime() - new Date(log.start_time).getTime()) / (1000 * 60));
+
+        const row = [
+          log.id,
+          log.equipment?.equipment_id || '',
+          log.equipment?.equipment_type || '',
+          log.user_profile?.full_name || '',
+          getLocationName(log.location_id),
+          new Date(log.start_time).toLocaleString(),
+          log.end_time ? new Date(log.end_time).toLocaleString() : 'Active',
+          duration.toString(),
+          log.end_time ? 'Completed' : 'Active',
+          new Date(log.created_at).toLocaleString()
+        ];
+
+        // Escape fields that might contain commas
+        const escapedRow = row.map(field => {
+          const fieldStr = String(field);
+          if (fieldStr.includes(',') || fieldStr.includes('"') || fieldStr.includes('\n')) {
+            return `"${fieldStr.replace(/"/g, '""')}"`;
+          }
+          return fieldStr;
+        });
+
+        csvRows.push(escapedRow.join(','));
+      });
+
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      // Generate filename with date range
+      const locationStr = selectedLocation === 'all' ? 'all-locations' : getLocationName(selectedLocation).replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      const dateStr = startDate && endDate 
+        ? `${startDate}_to_${endDate}`
+        : startDate 
+        ? `from_${startDate}`
+        : endDate
+        ? `until_${endDate}`
+        : 'all-dates';
+      
+      link.href = url;
+      link.download = `charging-logs_${locationStr}_${dateStr}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading CSV:', error);
+      alert('Failed to download data');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">Charging Records</h2>
-        <p className="text-sm text-gray-500 mt-1">View and monitor equipment charging activities</p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Charging Records</h2>
+          <p className="text-sm text-gray-500 mt-1">View and monitor equipment charging activities</p>
+        </div>
+        {(profile?.role === 'admin' || profile?.role === 'super_admin') && (
+          <button
+            onClick={downloadCSV}
+            disabled={downloading || loading || filteredLogs.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            {downloading ? 'Downloading...' : 'Download CSV'}
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by equipment ID, type, or user..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+        <div className="flex flex-col gap-4 mb-6">
+          <div className="flex flex-col lg:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by equipment ID, type, or user..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
 
-          {profile?.role === 'super_admin' && (
+            {profile?.role === 'super_admin' && (
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <select
+                  value={selectedLocation}
+                  onChange={(e) => setSelectedLocation(e.target.value)}
+                  className="pl-10 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white appearance-none cursor-pointer"
+                >
+                  <option value="all">All Locations</option>
+                  {locations.map(location => (
+                    <option key={location.id} value={location.id}>
+                      {location.code} - {location.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <select
-                value={selectedLocation}
-                onChange={(e) => setSelectedLocation(e.target.value)}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'active' | 'completed' | 'all')}
                 className="pl-10 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white appearance-none cursor-pointer"
               >
-                <option value="all">All Locations</option>
-                {locations.map(location => (
-                  <option key={location.id} value={location.id}>
-                    {location.code} - {location.name}
-                  </option>
-                ))}
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
               </select>
             </div>
-          )}
+          </div>
 
-          <div className="relative">
-            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'active' | 'completed' | 'all')}
-              className="pl-10 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white appearance-none cursor-pointer"
-            >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-            </select>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            {(startDate || endDate) && (
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                  }}
+                  className="px-4 py-2.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Clear Dates
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, ChargingLog, Location } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, MapPin, Clock, Download } from 'lucide-react';
+import { Search, MapPin, Clock, Download, Zap } from 'lucide-react';
 
 interface ChargingRecordsTableProps {
   locations: Location[];
@@ -23,6 +23,7 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
 
   useEffect(() => {
     fetchChargingLogs();
+    fetchActiveChargingCount();
   }, [selectedLocation, statusFilter, startDate, endDate]);
 
   const fetchChargingLogs = async () => {
@@ -93,6 +94,36 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
       log.user_profile?.full_name.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
+
+  // Calculate active charging count from database
+  const [activeChargingCount, setActiveChargingCount] = useState(0);
+
+  useEffect(() => {
+    fetchActiveChargingCount();
+  }, [selectedLocation, profile]);
+
+  const fetchActiveChargingCount = async () => {
+    try {
+      let query = supabase
+        .from('charging_logs')
+        .select('id', { count: 'exact', head: true })
+        .is('end_time', null);
+
+      // Apply location filter
+      if (profile?.role === 'admin') {
+        query = query.eq('location_id', profile.location_id);
+      } else if (selectedLocation !== 'all') {
+        query = query.eq('location_id', selectedLocation);
+      }
+
+      const { count, error } = await query;
+
+      if (error) throw error;
+      setActiveChargingCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching active charging count:', error);
+    }
+  };
 
   const downloadCSV = async () => {
     setDownloading(true);
@@ -225,6 +256,25 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
             {downloading ? 'Downloading...' : 'Download CSV'}
           </button>
         )}
+      </div>
+
+      {/* Active Charging Card */}
+      <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl shadow-lg p-6 text-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-5 h-5" />
+              <h3 className="text-sm font-medium uppercase tracking-wide opacity-90">Active Charging</h3>
+            </div>
+            <p className="text-4xl font-bold">{activeChargingCount}</p>
+            <p className="text-sm opacity-90 mt-1">
+              {activeChargingCount === 1 ? 'equipment currently charging' : 'equipment currently charging'}
+            </p>
+          </div>
+          <div className="bg-white/20 p-4 rounded-lg backdrop-blur-sm">
+            <Zap className="w-12 h-12" />
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

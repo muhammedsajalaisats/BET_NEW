@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react';
-import { LogOut, Plane, Power, StopCircle, AlertCircle } from 'lucide-react';
+import { LogOut, Plane, Power, StopCircle, AlertCircle, RefreshCw, Battery } from 'lucide-react';
 import { supabase, BETRecord, ChargingLog } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import queryString from 'query-string';
 
 interface Equipment extends BETRecord {
   id: string;
+}
+
+interface SwappingLog {
+  id: number;
+  created_at: string;
+  User_id: string;
+  location_id: string;
+  equipment_id: string;
+  Count: string;
 }
 
 export default function UserDashboard() {
@@ -16,8 +25,11 @@ export default function UserDashboard() {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [logs, setLogs] = useState<ChargingLog[]>([]);
+  const [totalSwapCount, setTotalSwapCount] = useState<number>(0);
   const [operationLoading, setOperationLoading] = useState(false);
+  const [swappingLoading, setSwappingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [swappingSuccess, setSwappingSuccess] = useState<string | null>(null);
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -32,9 +44,10 @@ export default function UserDashboard() {
     if (selectedEquipment) {
       fetchCurrentSession();
       fetchLogs();
+      fetchTotalSwapCount();
 
       // Subscribe to charging log changes for this equipment
-      const channel = supabase
+      const chargingChannel = supabase
         .channel(`charging_logs_${selectedEquipment.id}`)
         .on(
           'postgres_changes',
@@ -51,8 +64,26 @@ export default function UserDashboard() {
         )
         .subscribe();
 
+      // Subscribe to swapping log changes for this equipment
+      const swappingChannel = supabase
+        .channel(`swapping_logs_${selectedEquipment.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'swapping_log',
+            filter: `equipment_id=eq.${selectedEquipment.id}`,
+          },
+          () => {
+            fetchTotalSwapCount();
+          }
+        )
+        .subscribe();
+
       return () => {
-        supabase.removeChannel(channel);
+        supabase.removeChannel(chargingChannel);
+        supabase.removeChannel(swappingChannel);
       };
     }
   }, [selectedEquipment?.id]);
@@ -149,6 +180,22 @@ export default function UserDashboard() {
     }
   };
 
+  const fetchTotalSwapCount = async () => {
+    if (!selectedEquipment) return;
+    try {
+      const { data, error, count } = await supabase
+        .from('swapping_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('equipment_id', selectedEquipment.id);
+
+      if (error) throw error;
+      setTotalSwapCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching total swap count:', error);
+      setTotalSwapCount(0);
+    }
+  };
+
   const startCharging = async () => {
     if (!selectedEquipment || !profile) {
       setError('No equipment selected or user not authenticated');
@@ -217,6 +264,47 @@ export default function UserDashboard() {
       setError(err.message || 'Failed to stop charging');
     } finally {
       setOperationLoading(false);
+    }
+  };
+
+  const recordBatterySwap = async () => {
+    if (!selectedEquipment || !profile) {
+      setError('No equipment selected or user not authenticated');
+      return;
+    }
+
+    setSwappingLoading(true);
+    setError('');
+    setSwappingSuccess(null);
+
+    try {
+      // Insert new swapping log with count = 1
+      const { error: insertError } = await supabase
+        .from('swapping_log')
+        .insert([{
+          User_id: profile.id,
+          location_id: selectedEquipment.location_id,
+          equipment_id: selectedEquipment.id,
+          Count: '1',
+        }]);
+
+      if (insertError) throw insertError;
+
+      setSwappingSuccess('Battery swap recorded successfully!');
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setSwappingSuccess(null);
+      }, 3000);
+
+      // Refresh total count
+      fetchTotalSwapCount();
+      
+    } catch (err: any) {
+      console.error('Error recording battery swap:', err);
+      setError(err.message || 'Failed to record battery swap');
+    } finally {
+      setSwappingLoading(false);
     }
   };
 
@@ -339,6 +427,12 @@ export default function UserDashboard() {
                 </div>
               )}
 
+              {swappingSuccess && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-green-700">{swappingSuccess}</p>
+                </div>
+              )}
+
               {currentSession && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                   <div className="flex items-center justify-between">
@@ -359,6 +453,29 @@ export default function UserDashboard() {
                   </div>
                 </div>
               )}
+
+              {/* Battery Swapping Section */}
+              <div className="border-t border-gray-200 pt-6 mt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-md font-semibold text-gray-900 flex items-center gap-2">
+                      <Battery className="w-5 h-5 text-amber-600" />
+                      Battery Swapping
+                    </h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Total swaps: {totalSwapCount}
+                    </p>
+                  </div>
+                  <button
+                    onClick={recordBatterySwap}
+                    disabled={swappingLoading}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                  >
+                    <RefreshCw className={`w-5 h-5 ${swappingLoading ? 'animate-spin' : ''}`} />
+                    {swappingLoading ? 'Recording...' : 'Record Swap'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

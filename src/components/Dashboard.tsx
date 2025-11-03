@@ -5,6 +5,7 @@ import { Plus, Search, Filter, Plane, MapPin, AlertCircle, CheckCircle, Wrench, 
 import BETRecordForm from './BETRecordForm';
 import UserManagement from './UserManagement';
 import ChargingRecordsTable from './ChargingRecordsTable';
+import SwappingControl from './SwappingControl';
 
 export default function Dashboard() {
   const { profile, signOut } = useAuth();
@@ -15,7 +16,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BETRecord | null>(null);
-  const [activeTab, setActiveTab] = useState<'records' | 'users' | 'charging'>('records');
+  const [activeTab, setActiveTab] = useState<'records' | 'users' | 'charging' | 'swapping'>('records');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -185,6 +186,16 @@ export default function Dashboard() {
               >
                 Charging Control
               </button>
+              <button
+                onClick={() => setActiveTab('swapping')}
+                className={`px-4 py-2 font-medium text-sm transition-colors ${
+                  activeTab === 'swapping'
+                    ? 'border-b-2 border-purple-600 text-purple-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Swapping Control
+              </button>
             </div>
           </div>
         )}
@@ -193,6 +204,8 @@ export default function Dashboard() {
           <UserManagement locations={locations} />
         ) : activeTab === 'charging' ? (
           <ChargingRecordsTable locations={locations} />
+        ) : activeTab === 'swapping' ? (
+          <SwappingControl locations={locations} />
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

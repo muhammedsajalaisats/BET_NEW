@@ -50,3 +50,15 @@ export interface ChargingLog {
   created_at: string;
   updated_at: string;
 }
+
+export interface SwappingLog {
+  id: number;
+  created_at: string;
+  User_id: string;
+  location_id: string;
+  equipment_id: string;
+  Count: string;
+  user_profiles?: UserProfile;
+  bet_records?: BETRecord;
+  locations?: Location;
+}

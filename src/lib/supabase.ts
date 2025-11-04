@@ -17,9 +17,11 @@ export interface UserProfile {
   id: string;
   email: string;
   full_name: string;
-  role: 'super_admin' | 'admin' | 'user';
+  role: 'user' | 'admin' | 'super_admin';
   location_id: string | null;
   is_active: boolean;
+  Charging_Access: boolean;  // Use capital letters to match DB
+  Swapping_Access: boolean;  // Use capital letters to match DB
   created_at: string;
   updated_at: string;
 }

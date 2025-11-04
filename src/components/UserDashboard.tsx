@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LogOut, Plane, Power, StopCircle, AlertCircle, RefreshCw, Battery } from 'lucide-react';
-import { supabase, BETRecord, ChargingLog } from '../lib/supabase';
+import { supabase, BETRecord, ChargingLog, UserProfile } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import queryString from 'query-string';
 
@@ -202,6 +202,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Check if user has charging access
+    if (!profile.Charging_Access) {
+      setError('You do not have permission to start charging');
+      return;
+    }
+
     // Check if equipment already has an active session (safety check)
     await fetchCurrentSession();
     if (currentSession) {
@@ -243,6 +249,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Check if user has charging access
+    if (!profile.Charging_Access) {
+      setError('You do not have permission to stop charging');
+      return;
+    }
+
     setOperationLoading(true);
     setError('');
 
@@ -270,6 +282,12 @@ export default function UserDashboard() {
   const recordBatterySwap = async () => {
     if (!selectedEquipment || !profile) {
       setError('No equipment selected or user not authenticated');
+      return;
+    }
+
+    // Check if user has swapping access
+    if (!profile.Swapping_Access) {
+      setError('You do not have permission to record battery swaps');
       return;
     }
 
@@ -329,6 +347,14 @@ export default function UserDashboard() {
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{profile?.full_name}</p>
                 <p className="text-xs text-gray-500 capitalize">{profile?.role?.replace('_', ' ')}</p>
+                <div className="flex gap-2 mt-1">
+                  {profile?.Charging_Access && (
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">Charging</span>
+                  )}
+                  {profile?.Swapping_Access && (
+                    <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Swapping</span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => signOut()}
@@ -402,7 +428,7 @@ export default function UserDashboard() {
                   {isEquipmentCharging ? (
                     <button
                       onClick={stopCharging}
-                      disabled={operationLoading}
+                      disabled={operationLoading || !profile?.Charging_Access}
                       className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
                       <StopCircle className="w-5 h-5" />
@@ -411,7 +437,7 @@ export default function UserDashboard() {
                   ) : (
                     <button
                       onClick={startCharging}
-                      disabled={operationLoading}
+                      disabled={operationLoading || !profile?.Charging_Access}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
                       <Power className="w-5 h-5" />
@@ -468,7 +494,7 @@ export default function UserDashboard() {
                   </div>
                   <button
                     onClick={recordBatterySwap}
-                    disabled={swappingLoading}
+                    disabled={swappingLoading || !profile?.Swapping_Access}
                     className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                   >
                     <RefreshCw className={`w-5 h-5 ${swappingLoading ? 'animate-spin' : ''}`} />

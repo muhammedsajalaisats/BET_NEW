@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase, Location, UserProfile } from '../lib/supabase';
-import { Plus, X, UserPlus, Mail, MapPin, Shield } from 'lucide-react';
+import { Plus, X, UserPlus, Mail, MapPin, Shield, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import EditUserForm from './EditUserForm';
 
@@ -13,6 +13,7 @@ export default function UserManagement({ locations }: UserManagementProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const { profile } = useAuth();
 
   useEffect(() => {
@@ -60,6 +61,17 @@ export default function UserManagement({ locations }: UserManagementProps) {
     }
   };
 
+  // Filter users based on search query
+  const filteredUsers = users.filter(user => {
+    const query = searchQuery.toLowerCase();
+    return (
+      user.full_name.toLowerCase().includes(query) ||
+      user.email.toLowerCase().includes(query) ||
+      user.role.toLowerCase().includes(query) ||
+      getLocationName(user.location_id).toLowerCase().includes(query)
+    );
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -86,16 +98,40 @@ export default function UserManagement({ locations }: UserManagementProps) {
         </button>
       </div>
 
+      {/* Search Bar */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by name, email, role, or location..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
             <p className="text-gray-600 mt-3">Loading users...</p>
           </div>
-        ) : users.length === 0 ? (
+        ) : filteredUsers.length === 0 ? (
           <div className="text-center py-12">
             <UserPlus className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-            <p className="text-gray-500">No users found</p>
+            <p className="text-gray-500">
+              {searchQuery ? 'No users found matching your search' : 'No users found'}
+            </p>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-3 text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Clear search
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -112,7 +148,7 @@ export default function UserManagement({ locations }: UserManagementProps) {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {filteredUsers.map((user) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-sm font-medium text-gray-900">{user.full_name}</td>
                     <td className="py-4 px-6 text-sm text-gray-700">

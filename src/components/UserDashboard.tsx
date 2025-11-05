@@ -30,6 +30,9 @@ export default function UserDashboard() {
   const [swappingLoading, setSwappingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [swappingSuccess, setSwappingSuccess] = useState<string | null>(null);
+  const [showChargingConfirm, setShowChargingConfirm] = useState(false);
+  const [showSwapConfirm, setShowSwapConfirm] = useState(false);
+  const [showStopChargingConfirm, setShowStopChargingConfirm] = useState(false);
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -326,6 +329,33 @@ export default function UserDashboard() {
     }
   };
 
+  const handleStartChargingClick = () => {
+    setShowChargingConfirm(true);
+  };
+
+  const handleStopChargingClick = () => {
+    setShowStopChargingConfirm(true);
+  };
+
+  const handleRecordSwapClick = () => {
+    setShowSwapConfirm(true);
+  };
+
+  const confirmStartCharging = () => {
+    setShowChargingConfirm(false);
+    startCharging();
+  };
+
+  const confirmStopCharging = () => {
+    setShowStopChargingConfirm(false);
+    stopCharging();
+  };
+
+  const confirmRecordSwap = () => {
+    setShowSwapConfirm(false);
+    recordBatterySwap();
+  };
+
   // Determine button state based on equipment's current session
   const isEquipmentCharging = currentSession !== null;
 
@@ -427,7 +457,7 @@ export default function UserDashboard() {
                 <div className="flex items-center gap-3">
                   {isEquipmentCharging ? (
                     <button
-                      onClick={stopCharging}
+                      onClick={handleStopChargingClick}
                       disabled={operationLoading || !profile?.Charging_Access}
                       className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
@@ -436,7 +466,7 @@ export default function UserDashboard() {
                     </button>
                   ) : (
                     <button
-                      onClick={startCharging}
+                      onClick={handleStartChargingClick}
                       disabled={operationLoading || !profile?.Charging_Access}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                     >
@@ -493,7 +523,7 @@ export default function UserDashboard() {
                     </p>
                   </div>
                   <button
-                    onClick={recordBatterySwap}
+                    onClick={handleRecordSwapClick}
                     disabled={swappingLoading || !profile?.Swapping_Access}
                     className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
                   >
@@ -506,6 +536,99 @@ export default function UserDashboard() {
           )}
         </div>
       </main>
+
+      {/* Charging Confirmation Modal */}
+      {showChargingConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                <Power className="w-6 h-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Start Charging</h3>
+            </div>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to start charging for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowChargingConfirm(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStartCharging}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Battery Swap Confirmation Modal */}
+      {showSwapConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
+                <Battery className="w-6 h-6 text-amber-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Battery Swap</h3>
+            </div>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to record a battery swap for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowSwapConfirm(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRecordSwap}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stop Charging Confirmation Modal */}
+      {showStopChargingConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <StopCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Stop Charging</h3>
+            </div>
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to stop charging for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowStopChargingConfirm(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStopCharging}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

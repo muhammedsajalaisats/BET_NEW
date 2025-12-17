@@ -17,6 +17,12 @@ interface SwappingLog {
   Count: string;
 }
 
+interface ChargingPoint {
+  id: string;
+  Charging_Points_Name: string;
+  Locations: string;
+}
+
 export default function UserDashboard() {
   const { profile, signOut } = useAuth();
   const [selectedEquipment, setSelectedEquipment] = useState<BETRecord | null>(null);
@@ -33,6 +39,9 @@ export default function UserDashboard() {
   const [showChargingConfirm, setShowChargingConfirm] = useState(false);
   const [showSwapConfirm, setShowSwapConfirm] = useState(false);
   const [showStopChargingConfirm, setShowStopChargingConfirm] = useState(false);
+  const [chargingPoints, setChargingPoints] = useState<ChargingPoint[]>([]);
+  const [selectedChargingPoint, setSelectedChargingPoint] = useState<string>('');
+  const [chargingPointsLoading, setChargingPointsLoading] = useState(false);
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -107,7 +116,63 @@ export default function UserDashboard() {
   };
 
   useEffect(() => {
-    fetchAllEquipment();
+    if (profile?.location_id) {
+      fetchAllEquipment();
+    }
+  }, [profile?.location_id]);
+
+  // Fetch charging points based on user location
+  const fetchChargingPoints = async () => {
+    if (!profile?.location_id) {
+      console.log('No location_id available');
+      return;
+    }
+    
+    setChargingPointsLoading(true);
+    
+    try {
+      console.log('Fetching charging points for location:', profile.location_id);
+      
+      const { data, error: fetchError } = await supabase
+        .from('Charging_Points')
+        .select('id, Charging_Points_Name, Locations')
+        .eq('Locations', profile.location_id)
+        .order('Charging_Points_Name', { ascending: true });
+
+      if (fetchError) {
+        console.error('Supabase error:', fetchError);
+        throw fetchError;
+      }
+      
+      console.log('Charging points fetched:', data);
+      setChargingPoints(data || []);
+      
+      // Clear any previous error if successful
+      if (data) {
+        setError(null);
+      }
+    } catch (error: any) {
+      console.error('Error fetching charging points:', error);
+      
+      // Show meaningful error message
+      if (error.code === '42P01') {
+        console.error('Charging_Points table does not exist');
+      } else if (error.code === '42703') {
+        console.error('Column Locations or Charging_Points_Name does not exist in Charging_Points table');
+      } else {
+        console.error('Failed to load charging points:', error.message);
+      }
+      
+      setChargingPoints([]);
+    } finally {
+      setChargingPointsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile?.location_id) {
+      fetchChargingPoints();
+    }
   }, [profile?.location_id]);
 
   const fetchEquipment = async (equipmentNo?: string) => {
@@ -211,6 +276,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate charging point selection - MANDATORY
+    if (!selectedChargingPoint) {
+      setError('Please select a charging point before starting');
+      return;
+    }
+
     // Check if equipment already has an active session (safety check)
     await fetchCurrentSession();
     if (currentSession) {
@@ -229,6 +300,7 @@ export default function UserDashboard() {
           user_id: profile.id,
           location_id: selectedEquipment.location_id,
           start_time: new Date().toISOString(),
+          charging_point_id: selectedChargingPoint,
         }])
         .select()
         .single();
@@ -330,6 +402,11 @@ export default function UserDashboard() {
   };
 
   const handleStartChargingClick = () => {
+    // Charging point selection is MANDATORY
+    if (!selectedChargingPoint) {
+      setError('Please select a charging point before starting');
+      return;
+    }
     setShowChargingConfirm(true);
   };
 
@@ -420,6 +497,7 @@ export default function UserDashboard() {
                   const selected = equipment.find(eq => eq.id === e.target.value);
                   setSelectedEquipment(selected || null);
                   setCurrentSession(null); // Reset session when equipment changes
+                  setSelectedChargingPoint(''); // Reset charging point when equipment changes
                   
                   // Update URL with equipment number
                   if (selected) {
@@ -454,27 +532,6 @@ export default function UserDashboard() {
                     Status: {selectedEquipment.status}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
-                  {isEquipmentCharging ? (
-                    <button
-                      onClick={handleStopChargingClick}
-                      disabled={operationLoading || !profile?.Charging_Access}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                    >
-                      <StopCircle className="w-5 h-5" />
-                      {operationLoading ? 'Stopping...' : 'Stop Charging'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleStartChargingClick}
-                      disabled={operationLoading || !profile?.Charging_Access}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                    >
-                      <Power className="w-5 h-5" />
-                      {operationLoading ? 'Starting...' : 'Start Charging'}
-                    </button>
-                  )}
-                </div>
               </div>
 
               {error && (
@@ -488,6 +545,69 @@ export default function UserDashboard() {
                   <p className="text-sm text-green-700">{swappingSuccess}</p>
                 </div>
               )}
+
+              {/* Charging Point Selection - Only show when not currently charging */}
+              {!isEquipmentCharging && profile?.Charging_Access && (
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Charging Point <span className="text-red-500">*</span>
+                  </label>
+                  {chargingPointsLoading ? (
+                    <div className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                      Loading charging points...
+                    </div>
+                  ) : chargingPoints.length > 0 ? (
+                    <select
+                      value={selectedChargingPoint}
+                      onChange={(e) => {
+                        setSelectedChargingPoint(e.target.value);
+                        setError(''); // Clear any previous errors
+                      }}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                      required
+                    >
+                      <option value="">Select a charging point</option>
+                      {chargingPoints.map(point => (
+                        <option key={point.id} value={point.id}>
+                          {point.Charging_Points_Name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full px-4 py-2.5 border border-amber-200 rounded-lg bg-amber-50 text-sm">
+                      <p className="text-amber-700 font-medium">
+                        No charging points configured for your location.
+                      </p>
+                      <p className="text-amber-600 text-xs mt-1">
+                        Please contact your administrator to set up charging points.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Charging Control Buttons */}
+              <div className="flex items-center gap-3 mb-6">
+                {isEquipmentCharging ? (
+                  <button
+                    onClick={handleStopChargingClick}
+                    disabled={operationLoading || !profile?.Charging_Access}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <StopCircle className="w-5 h-5" />
+                    {operationLoading ? 'Stopping...' : 'Stop Charging'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStartChargingClick}
+                    disabled={operationLoading || !profile?.Charging_Access || !selectedChargingPoint}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Power className="w-5 h-5" />
+                    {operationLoading ? 'Starting...' : 'Start Charging'}
+                  </button>
+                )}
+              </div>
 
               {currentSession && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -547,10 +667,15 @@ export default function UserDashboard() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Confirm Start Charging</h3>
             </div>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-2">
               Are you sure you want to start charging for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
             </p>
-            <div className="flex gap-3 justify-end">
+            {selectedChargingPoint && (
+              <p className="text-sm text-gray-500 mb-6">
+                Charging Point: <strong>{chargingPoints.find(p => p.id === selectedChargingPoint)?.Charging_Points_Name}</strong>
+              </p>
+            )}
+            <div className="flex gap-3 justify-end mt-6">
               <button
                 onClick={() => setShowChargingConfirm(false)}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"

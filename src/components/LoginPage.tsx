@@ -32,7 +32,7 @@ export default function LoginPage() {
             <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-fuchsia-600 rounded-xl flex items-center justify-center mb-4 shadow-lg">
               <Plane className="w-9 h-9 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">BET Tracker</h1>
+            <h1 className="text-2xl font-bold text-gray-900">EV Charging Tracker</h1>
             <p className="text-sm text-gray-500 mt-1">Air India SATS</p>
           </div>
 
@@ -132,7 +132,7 @@ export default function LoginPage() {
 
           <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-xs text-center text-gray-500">
-              BET Tracking System
+              EV Chaging Tracking System
             </p>
           </div>
         </div>

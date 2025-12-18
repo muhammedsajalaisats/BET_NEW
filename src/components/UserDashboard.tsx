@@ -17,14 +17,25 @@ interface SwappingLog {
   Count: string;
 }
 
+interface ChargingPoint {
+  id: string;
+  Charging_Points_Name: string;
+  Locations: string;
+}
+
+// Update the ChargingLog interface to include stopped_by
+interface UpdatedChargingLog extends Omit<ChargingLog, 'stopped_by'> {
+  stopped_by?: string;
+}
+
 export default function UserDashboard() {
   const { profile, signOut } = useAuth();
   const [selectedEquipment, setSelectedEquipment] = useState<BETRecord | null>(null);
-  const [currentSession, setCurrentSession] = useState<ChargingLog | null>(null);
+  const [currentSession, setCurrentSession] = useState<UpdatedChargingLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [logs, setLogs] = useState<ChargingLog[]>([]);
+  const [logs, setLogs] = useState<UpdatedChargingLog[]>([]);
   const [totalSwapCount, setTotalSwapCount] = useState<number>(0);
   const [operationLoading, setOperationLoading] = useState(false);
   const [swappingLoading, setSwappingLoading] = useState(false);
@@ -33,6 +44,33 @@ export default function UserDashboard() {
   const [showChargingConfirm, setShowChargingConfirm] = useState(false);
   const [showSwapConfirm, setShowSwapConfirm] = useState(false);
   const [showStopChargingConfirm, setShowStopChargingConfirm] = useState(false);
+  const [chargingPoints, setChargingPoints] = useState<ChargingPoint[]>([]);
+  const [selectedChargingPoint, setSelectedChargingPoint] = useState<string>('');
+  const [chargingPointsLoading, setChargingPointsLoading] = useState(false);
+  const [meterReading, setMeterReading] = useState<string>('');
+  const [swapMeterReading, setSwapMeterReading] = useState<string>('');
+  const [batteryNumber, setBatteryNumber] = useState<string>('');
+
+  // Function to validate and handle numeric input
+  const handleNumericInput = (value: string): string => {
+    // Remove all non-numeric characters except decimal point
+    const numericValue = value.replace(/[^\d.]/g, '');
+    
+    // Ensure only one decimal point
+    const parts = numericValue.split('.');
+    if (parts.length > 2) {
+      return parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    return numericValue;
+  };
+
+  // Function to validate if input contains only numbers and optional decimal
+  const isValidNumericInput = (value: string): boolean => {
+    // Allow empty string, numbers, and numbers with decimal point
+    if (value === '') return true;
+    return /^\d*\.?\d*$/.test(value);
+  };
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -107,7 +145,63 @@ export default function UserDashboard() {
   };
 
   useEffect(() => {
-    fetchAllEquipment();
+    if (profile?.location_id) {
+      fetchAllEquipment();
+    }
+  }, [profile?.location_id]);
+
+  // Fetch charging points based on user location
+  const fetchChargingPoints = async () => {
+    if (!profile?.location_id) {
+      console.log('No location_id available');
+      return;
+    }
+    
+    setChargingPointsLoading(true);
+    
+    try {
+      console.log('Fetching charging points for location:', profile.location_id);
+      
+      const { data, error: fetchError } = await supabase
+        .from('Charging_Points')
+        .select('id, Charging_Points_Name, Locations')
+        .eq('Locations', profile.location_id)
+        .order('Charging_Points_Name', { ascending: true });
+
+      if (fetchError) {
+        console.error('Supabase error:', fetchError);
+        throw fetchError;
+      }
+      
+      console.log('Charging points fetched:', data);
+      setChargingPoints(data || []);
+      
+      // Clear any previous error if successful
+      if (data) {
+        setError(null);
+      }
+    } catch (error: any) {
+      console.error('Error fetching charging points:', error);
+      
+      // Show meaningful error message
+      if (error.code === '42P01') {
+        console.error('Charging_Points table does not exist');
+      } else if (error.code === '42703') {
+        console.error('Column Locations or Charging_Points_Name does not exist in Charging_Points table');
+      } else {
+        console.error('Failed to load charging points:', error.message);
+      }
+      
+      setChargingPoints([]);
+    } finally {
+      setChargingPointsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile?.location_id) {
+      fetchChargingPoints();
+    }
   }, [profile?.location_id]);
 
   const fetchEquipment = async (equipmentNo?: string) => {
@@ -211,6 +305,24 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate charging point selection - MANDATORY
+    if (!selectedChargingPoint) {
+      setError('Please select a charging point before starting');
+      return;
+    }
+
+    // Validate meter reading - MANDATORY
+    if (!meterReading || meterReading.trim() === '') {
+      setError('Please enter a meter reading before starting');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(meterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     // Check if equipment already has an active session (safety check)
     await fetchCurrentSession();
     if (currentSession) {
@@ -229,6 +341,8 @@ export default function UserDashboard() {
           user_id: profile.id,
           location_id: selectedEquipment.location_id,
           start_time: new Date().toISOString(),
+          charging_point_id: selectedChargingPoint,
+          Meter_reading: meterReading,
         }])
         .select()
         .single();
@@ -262,17 +376,39 @@ export default function UserDashboard() {
     setError('');
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('charging_logs')
         .update({
           end_time: new Date().toISOString(),
+          stopped_by: profile.id  // Add the user who stopped the charging
         })
-        .eq('id', currentSession.id);
+        .eq('id', currentSession.id)
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (error) {
+        // If stopped_by column doesn't exist, try without it
+        if (error.message?.includes('stopped_by') || error.code === '42703') {
+          console.log('stopped_by column not found, updating without it');
+          const { error: fallbackError } = await supabase
+            .from('charging_logs')
+            .update({
+              end_time: new Date().toISOString(),
+            })
+            .eq('id', currentSession.id);
+          
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
 
       // Update local state immediately
       setCurrentSession(null);
+      
+      // Clear charging point selection and meter reading
+      setSelectedChargingPoint('');
+      setMeterReading('');
       
     } catch (err: any) {
       console.error('Error stopping charging:', err);
@@ -294,12 +430,30 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate meter reading - MANDATORY
+    if (!swapMeterReading || swapMeterReading.trim() === '') {
+      setError('Please enter a meter reading before recording swap');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(swapMeterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
+    // Validate battery number - MANDATORY
+    if (!batteryNumber || batteryNumber.trim() === '') {
+      setError('Please enter a battery number before recording swap');
+      return;
+    }
+
     setSwappingLoading(true);
     setError('');
     setSwappingSuccess(null);
 
     try {
-      // Insert new swapping log with count = 1
+      // Insert new swapping log with count = 1, meter reading, and battery number
       const { error: insertError } = await supabase
         .from('swapping_log')
         .insert([{
@@ -307,11 +461,17 @@ export default function UserDashboard() {
           location_id: selectedEquipment.location_id,
           equipment_id: selectedEquipment.id,
           Count: '1',
+          Meter_reading: swapMeterReading,
+          Battery_Number: batteryNumber,
         }]);
 
       if (insertError) throw insertError;
 
       setSwappingSuccess('Battery swap recorded successfully!');
+      
+      // Clear the inputs after successful swap
+      setSwapMeterReading('');
+      setBatteryNumber('');
       
       // Clear success message after 3 seconds
       setTimeout(() => {
@@ -330,6 +490,24 @@ export default function UserDashboard() {
   };
 
   const handleStartChargingClick = () => {
+    // Charging point selection is MANDATORY
+    if (!selectedChargingPoint) {
+      setError('Please select a charging point before starting');
+      return;
+    }
+
+    // Meter reading is MANDATORY
+    if (!meterReading || meterReading.trim() === '') {
+      setError('Please enter a meter reading before starting');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(meterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     setShowChargingConfirm(true);
   };
 
@@ -338,6 +516,24 @@ export default function UserDashboard() {
   };
 
   const handleRecordSwapClick = () => {
+    // Validate meter reading before showing confirmation
+    if (!swapMeterReading || swapMeterReading.trim() === '') {
+      setError('Please enter a meter reading before recording swap');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(swapMeterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
+    // Validate battery number before showing confirmation
+    if (!batteryNumber || batteryNumber.trim() === '') {
+      setError('Please enter a battery number before recording swap');
+      return;
+    }
+
     setShowSwapConfirm(true);
   };
 
@@ -356,6 +552,12 @@ export default function UserDashboard() {
     recordBatterySwap();
   };
 
+  // Get the selected charging point name
+  const getSelectedChargingPointName = () => {
+    const point = chargingPoints.find(p => p.Charging_Points_Name === selectedChargingPoint);
+    return point?.Charging_Points_Name || selectedChargingPoint;
+  };
+
   // Determine button state based on equipment's current session
   const isEquipmentCharging = currentSession !== null;
 
@@ -369,7 +571,7 @@ export default function UserDashboard() {
                 <Plane className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">BET Tracker</h1>
+                <h1 className="text-xl font-bold text-gray-900">EV Charging Tracker</h1>
                 <p className="text-xs text-gray-500">Air India SATS</p>
               </div>
             </div>
@@ -420,6 +622,10 @@ export default function UserDashboard() {
                   const selected = equipment.find(eq => eq.id === e.target.value);
                   setSelectedEquipment(selected || null);
                   setCurrentSession(null); // Reset session when equipment changes
+                  setSelectedChargingPoint(''); // Reset charging point when equipment changes
+                  setMeterReading(''); // Reset meter reading when equipment changes
+                  setSwapMeterReading(''); // Reset swap meter reading when equipment changes
+                  setBatteryNumber(''); // Reset battery number when equipment changes
                   
                   // Update URL with equipment number
                   if (selected) {
@@ -454,27 +660,6 @@ export default function UserDashboard() {
                     Status: {selectedEquipment.status}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
-                  {isEquipmentCharging ? (
-                    <button
-                      onClick={handleStopChargingClick}
-                      disabled={operationLoading || !profile?.Charging_Access}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                    >
-                      <StopCircle className="w-5 h-5" />
-                      {operationLoading ? 'Stopping...' : 'Stop Charging'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleStartChargingClick}
-                      disabled={operationLoading || !profile?.Charging_Access}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                    >
-                      <Power className="w-5 h-5" />
-                      {operationLoading ? 'Starting...' : 'Start Charging'}
-                    </button>
-                  )}
-                </div>
               </div>
 
               {error && (
@@ -488,6 +673,95 @@ export default function UserDashboard() {
                   <p className="text-sm text-green-700">{swappingSuccess}</p>
                 </div>
               )}
+
+              {/* Charging Point Selection - Only show when not currently charging */}
+              {!isEquipmentCharging && profile?.Charging_Access && (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Charging Point <span className="text-red-500">*</span>
+                    </label>
+                    {chargingPointsLoading ? (
+                      <div className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                        Loading charging points...
+                      </div>
+                    ) : chargingPoints.length > 0 ? (
+                      <select
+                        value={selectedChargingPoint}
+                        onChange={(e) => {
+                          setSelectedChargingPoint(e.target.value);
+                          setError(''); // Clear any previous errors
+                        }}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                        required
+                      >
+                        <option value="">Select a charging point</option>
+                        {chargingPoints.map(point => (
+                          <option key={point.id} value={point.Charging_Points_Name}>
+                            {point.Charging_Points_Name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-4 py-2.5 border border-amber-200 rounded-lg bg-amber-50 text-sm">
+                        <p className="text-amber-700 font-medium">
+                          No charging points configured for your location.
+                        </p>
+                        <p className="text-amber-600 text-xs mt-1">
+                          Please contact your administrator to set up charging points.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Meter Reading <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={meterReading}
+                      onChange={(e) => {
+                        const numericValue = handleNumericInput(e.target.value);
+                        setMeterReading(numericValue);
+                        setError(''); // Clear any previous errors
+                      }}
+                      placeholder="Enter meter reading"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                      required
+                      inputMode="decimal"
+                      pattern="[0-9]*\.?[0-9]*"
+                      title="Please enter numbers only"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Enter numbers only (e.g., 1234 or 1234.5)
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Charging Control Buttons */}
+              <div className="flex items-center gap-3 mb-6">
+                {isEquipmentCharging ? (
+                  <button
+                    onClick={handleStopChargingClick}
+                    disabled={operationLoading || !profile?.Charging_Access}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <StopCircle className="w-5 h-5" />
+                    {operationLoading ? 'Stopping...' : 'Stop Charging'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStartChargingClick}
+                    disabled={operationLoading || !profile?.Charging_Access || !selectedChargingPoint || !meterReading}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Power className="w-5 h-5" />
+                    {operationLoading ? 'Starting...' : 'Start Charging'}
+                  </button>
+                )}
+              </div>
 
               {currentSession && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -511,27 +785,74 @@ export default function UserDashboard() {
               )}
 
               {/* Battery Swapping Section */}
-              <div className="border-t border-gray-200 pt-6 mt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-md font-semibold text-gray-900 flex items-center gap-2">
+              {profile?.Swapping_Access && (
+                <div className="border-t border-gray-200 pt-6 mt-6">
+                  <div className="mb-4">
+                    <h4 className="text-md font-semibold text-gray-900 flex items-center gap-2 mb-3">
                       <Battery className="w-5 h-5 text-amber-600" />
                       Battery Swapping
                     </h4>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 mb-4">
                       Total swaps: {totalSwapCount}
                     </p>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Battery Number <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={batteryNumber}
+                          onChange={(e) => {
+                            setBatteryNumber(e.target.value);
+                            setError(''); // Clear any previous errors
+                          }}
+                          placeholder="Enter battery number"
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white"
+                          required
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enter the battery identification number
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Meter Reading <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={swapMeterReading}
+                          onChange={(e) => {
+                            const numericValue = handleNumericInput(e.target.value);
+                            setSwapMeterReading(numericValue);
+                            setError(''); // Clear any previous errors
+                          }}
+                          placeholder="Enter meter reading"
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white"
+                          required
+                          inputMode="decimal"
+                          pattern="[0-9]*\.?[0-9]*"
+                          title="Please enter numbers only"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enter numbers only (e.g., 1234 or 1234.5)
+                        </p>
+                      </div>
+                    </div>
                   </div>
+
                   <button
                     onClick={handleRecordSwapClick}
-                    disabled={swappingLoading || !profile?.Swapping_Access}
-                    className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                    disabled={swappingLoading || !profile?.Swapping_Access || !swapMeterReading || !batteryNumber}
+                    className="w-full px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                   >
                     <RefreshCw className={`w-5 h-5 ${swappingLoading ? 'animate-spin' : ''}`} />
                     {swappingLoading ? 'Recording...' : 'Record Swap'}
                   </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -547,10 +868,20 @@ export default function UserDashboard() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Confirm Start Charging</h3>
             </div>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-2">
               Are you sure you want to start charging for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
             </p>
-            <div className="flex gap-3 justify-end">
+            {selectedChargingPoint && (
+              <p className="text-sm text-gray-500 mb-2">
+                Charging Point: <strong>{getSelectedChargingPointName()}</strong>
+              </p>
+            )}
+            {meterReading && (
+              <p className="text-sm text-gray-500 mb-6">
+                Meter Reading: <strong>{meterReading}</strong>
+              </p>
+            )}
+            <div className="flex gap-3 justify-end mt-6">
               <button
                 onClick={() => setShowChargingConfirm(false)}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
@@ -578,9 +909,19 @@ export default function UserDashboard() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Confirm Battery Swap</h3>
             </div>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-2">
               Are you sure you want to record a battery swap for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
             </p>
+            {batteryNumber && (
+              <p className="text-sm text-gray-500 mb-2">
+                Battery Number: <strong>{batteryNumber}</strong>
+              </p>
+            )}
+            {swapMeterReading && (
+              <p className="text-sm text-gray-500 mb-6">
+                Meter Reading: <strong>{swapMeterReading}</strong>
+              </p>
+            )}
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowSwapConfirm(false)}

@@ -42,6 +42,7 @@ export default function UserDashboard() {
   const [chargingPoints, setChargingPoints] = useState<ChargingPoint[]>([]);
   const [selectedChargingPoint, setSelectedChargingPoint] = useState<string>('');
   const [chargingPointsLoading, setChargingPointsLoading] = useState(false);
+  const [meterReading, setMeterReading] = useState<string>('');
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -282,6 +283,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate meter reading - MANDATORY
+    if (!meterReading || meterReading.trim() === '') {
+      setError('Please enter a meter reading before starting');
+      return;
+    }
+
     // Check if equipment already has an active session (safety check)
     await fetchCurrentSession();
     if (currentSession) {
@@ -301,6 +308,7 @@ export default function UserDashboard() {
           location_id: selectedEquipment.location_id,
           start_time: new Date().toISOString(),
           charging_point_id: selectedChargingPoint,
+          Meter_reading: meterReading,
         }])
         .select()
         .single();
@@ -407,6 +415,13 @@ export default function UserDashboard() {
       setError('Please select a charging point before starting');
       return;
     }
+
+    // Meter reading is MANDATORY
+    if (!meterReading || meterReading.trim() === '') {
+      setError('Please enter a meter reading before starting');
+      return;
+    }
+
     setShowChargingConfirm(true);
   };
 
@@ -498,6 +513,7 @@ export default function UserDashboard() {
                   setSelectedEquipment(selected || null);
                   setCurrentSession(null); // Reset session when equipment changes
                   setSelectedChargingPoint(''); // Reset charging point when equipment changes
+                  setMeterReading(''); // Reset meter reading when equipment changes
                   
                   // Update URL with equipment number
                   if (selected) {
@@ -548,42 +564,61 @@ export default function UserDashboard() {
 
               {/* Charging Point Selection - Only show when not currently charging */}
               {!isEquipmentCharging && profile?.Charging_Access && (
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Charging Point <span className="text-red-500">*</span>
-                  </label>
-                  {chargingPointsLoading ? (
-                    <div className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
-                      Loading charging points...
-                    </div>
-                  ) : chargingPoints.length > 0 ? (
-                    <select
-                      value={selectedChargingPoint}
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Charging Point <span className="text-red-500">*</span>
+                    </label>
+                    {chargingPointsLoading ? (
+                      <div className="w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                        Loading charging points...
+                      </div>
+                    ) : chargingPoints.length > 0 ? (
+                      <select
+                        value={selectedChargingPoint}
+                        onChange={(e) => {
+                          setSelectedChargingPoint(e.target.value);
+                          setError(''); // Clear any previous errors
+                        }}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                        required
+                      >
+                        <option value="">Select a charging point</option>
+                        {chargingPoints.map(point => (
+                          <option key={point.id} value={point.id}>
+                            {point.Charging_Points_Name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-4 py-2.5 border border-amber-200 rounded-lg bg-amber-50 text-sm">
+                        <p className="text-amber-700 font-medium">
+                          No charging points configured for your location.
+                        </p>
+                        <p className="text-amber-600 text-xs mt-1">
+                          Please contact your administrator to set up charging points.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Meter Reading <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={meterReading}
                       onChange={(e) => {
-                        setSelectedChargingPoint(e.target.value);
+                        setMeterReading(e.target.value);
                         setError(''); // Clear any previous errors
                       }}
+                      placeholder="Enter meter reading"
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                       required
-                    >
-                      <option value="">Select a charging point</option>
-                      {chargingPoints.map(point => (
-                        <option key={point.id} value={point.id}>
-                          {point.Charging_Points_Name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="w-full px-4 py-2.5 border border-amber-200 rounded-lg bg-amber-50 text-sm">
-                      <p className="text-amber-700 font-medium">
-                        No charging points configured for your location.
-                      </p>
-                      <p className="text-amber-600 text-xs mt-1">
-                        Please contact your administrator to set up charging points.
-                      </p>
-                    </div>
-                  )}
-                </div>
+                    />
+                  </div>
+                </>
               )}
 
               {/* Charging Control Buttons */}
@@ -600,7 +635,7 @@ export default function UserDashboard() {
                 ) : (
                   <button
                     onClick={handleStartChargingClick}
-                    disabled={operationLoading || !profile?.Charging_Access || !selectedChargingPoint}
+                    disabled={operationLoading || !profile?.Charging_Access || !selectedChargingPoint || !meterReading}
                     className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                   >
                     <Power className="w-5 h-5" />
@@ -671,8 +706,13 @@ export default function UserDashboard() {
               Are you sure you want to start charging for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
             </p>
             {selectedChargingPoint && (
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-gray-500 mb-2">
                 Charging Point: <strong>{chargingPoints.find(p => p.id === selectedChargingPoint)?.Charging_Points_Name}</strong>
+              </p>
+            )}
+            {meterReading && (
+              <p className="text-sm text-gray-500 mb-6">
+                Meter Reading: <strong>{meterReading}</strong>
               </p>
             )}
             <div className="flex gap-3 justify-end mt-6">

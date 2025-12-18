@@ -44,6 +44,7 @@ export default function UserDashboard() {
   const [chargingPointsLoading, setChargingPointsLoading] = useState(false);
   const [meterReading, setMeterReading] = useState<string>('');
   const [swapMeterReading, setSwapMeterReading] = useState<string>('');
+  const [batteryNumber, setBatteryNumber] = useState<string>('');
 
   // Function to validate and handle numeric input
   const handleNumericInput = (value: string): string => {
@@ -414,12 +415,18 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate battery number - MANDATORY
+    if (!batteryNumber || batteryNumber.trim() === '') {
+      setError('Please enter a battery number before recording swap');
+      return;
+    }
+
     setSwappingLoading(true);
     setError('');
     setSwappingSuccess(null);
 
     try {
-      // Insert new swapping log with count = 1 and meter reading
+      // Insert new swapping log with count = 1, meter reading, and battery number
       const { error: insertError } = await supabase
         .from('swapping_log')
         .insert([{
@@ -428,14 +435,16 @@ export default function UserDashboard() {
           equipment_id: selectedEquipment.id,
           Count: '1',
           Meter_reading: swapMeterReading,
+          Battery_Number: batteryNumber,
         }]);
 
       if (insertError) throw insertError;
 
       setSwappingSuccess('Battery swap recorded successfully!');
       
-      // Clear the meter reading input after successful swap
+      // Clear the inputs after successful swap
       setSwapMeterReading('');
+      setBatteryNumber('');
       
       // Clear success message after 3 seconds
       setTimeout(() => {
@@ -489,6 +498,12 @@ export default function UserDashboard() {
     // Validate that meter reading is a valid number
     if (!isValidNumericInput(swapMeterReading)) {
       setError('Meter reading must be a valid number');
+      return;
+    }
+
+    // Validate battery number before showing confirmation
+    if (!batteryNumber || batteryNumber.trim() === '') {
+      setError('Please enter a battery number before recording swap');
       return;
     }
 
@@ -577,6 +592,7 @@ export default function UserDashboard() {
                   setSelectedChargingPoint(''); // Reset charging point when equipment changes
                   setMeterReading(''); // Reset meter reading when equipment changes
                   setSwapMeterReading(''); // Reset swap meter reading when equipment changes
+                  setBatteryNumber(''); // Reset battery number when equipment changes
                   
                   // Update URL with equipment number
                   if (selected) {
@@ -747,32 +763,56 @@ export default function UserDashboard() {
                       Total swaps: {totalSwapCount}
                     </p>
 
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Meter Reading <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={swapMeterReading}
-                      onChange={(e) => {
-                        const numericValue = handleNumericInput(e.target.value);
-                        setSwapMeterReading(numericValue);
-                        setError(''); // Clear any previous errors
-                      }}
-                      placeholder="Enter meter reading"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white mb-4"
-                      required
-                      inputMode="decimal"
-                      pattern="[0-9]*\.?[0-9]*"
-                      title="Please enter numbers only"
-                    />
-                    <p className="text-xs text-gray-500 mb-4">
-                      Enter numbers only (e.g., 1234 or 1234.5)
-                    </p>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Battery Number <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={batteryNumber}
+                          onChange={(e) => {
+                            setBatteryNumber(e.target.value);
+                            setError(''); // Clear any previous errors
+                          }}
+                          placeholder="Enter battery number"
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white"
+                          required
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enter the battery identification number
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Meter Reading <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={swapMeterReading}
+                          onChange={(e) => {
+                            const numericValue = handleNumericInput(e.target.value);
+                            setSwapMeterReading(numericValue);
+                            setError(''); // Clear any previous errors
+                          }}
+                          placeholder="Enter meter reading"
+                          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white"
+                          required
+                          inputMode="decimal"
+                          pattern="[0-9]*\.?[0-9]*"
+                          title="Please enter numbers only"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enter numbers only (e.g., 1234 or 1234.5)
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
                   <button
                     onClick={handleRecordSwapClick}
-                    disabled={swappingLoading || !profile?.Swapping_Access || !swapMeterReading}
+                    disabled={swappingLoading || !profile?.Swapping_Access || !swapMeterReading || !batteryNumber}
                     className="w-full px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                   >
                     <RefreshCw className={`w-5 h-5 ${swappingLoading ? 'animate-spin' : ''}`} />
@@ -836,9 +876,19 @@ export default function UserDashboard() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Confirm Battery Swap</h3>
             </div>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-2">
               Are you sure you want to record a battery swap for equipment <strong>{selectedEquipment?.equipment_id}</strong>?
             </p>
+            {batteryNumber && (
+              <p className="text-sm text-gray-500 mb-2">
+                Battery Number: <strong>{batteryNumber}</strong>
+              </p>
+            )}
+            {swapMeterReading && (
+              <p className="text-sm text-gray-500 mb-6">
+                Meter Reading: <strong>{swapMeterReading}</strong>
+              </p>
+            )}
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowSwapConfirm(false)}

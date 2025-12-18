@@ -552,6 +552,12 @@ export default function UserDashboard() {
     recordBatterySwap();
   };
 
+  // Get the selected charging point name
+  const getSelectedChargingPointName = () => {
+    const point = chargingPoints.find(p => p.Charging_Points_Name === selectedChargingPoint);
+    return point?.Charging_Points_Name || selectedChargingPoint;
+  };
+
   // Determine button state based on equipment's current session
   const isEquipmentCharging = currentSession !== null;
 
@@ -691,7 +697,7 @@ export default function UserDashboard() {
                       >
                         <option value="">Select a charging point</option>
                         {chargingPoints.map(point => (
-                          <option key={point.id} value={point.id}>
+                          <option key={point.id} value={point.Charging_Points_Name}>
                             {point.Charging_Points_Name}
                           </option>
                         ))}
@@ -867,7 +873,7 @@ export default function UserDashboard() {
             </p>
             {selectedChargingPoint && (
               <p className="text-sm text-gray-500 mb-2">
-                Charging Point: <strong>{chargingPoints.find(p => p.id === selectedChargingPoint)?.Charging_Points_Name}</strong>
+                Charging Point: <strong>{getSelectedChargingPointName()}</strong>
               </p>
             )}
             {meterReading && (

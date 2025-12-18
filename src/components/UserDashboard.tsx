@@ -565,7 +565,7 @@ export default function UserDashboard() {
                 <Plane className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">BET Tracker</h1>
+                <h1 className="text-xl font-bold text-gray-900">EV Charging Tracker</h1>
                 <p className="text-xs text-gray-500">Air India SATS</p>
               </div>
             </div>

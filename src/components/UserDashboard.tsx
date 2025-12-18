@@ -23,14 +23,19 @@ interface ChargingPoint {
   Locations: string;
 }
 
+// Update the ChargingLog interface to include stopped_by
+interface UpdatedChargingLog extends Omit<ChargingLog, 'stopped_by'> {
+  stopped_by?: string;
+}
+
 export default function UserDashboard() {
   const { profile, signOut } = useAuth();
   const [selectedEquipment, setSelectedEquipment] = useState<BETRecord | null>(null);
-  const [currentSession, setCurrentSession] = useState<ChargingLog | null>(null);
+  const [currentSession, setCurrentSession] = useState<UpdatedChargingLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [logs, setLogs] = useState<ChargingLog[]>([]);
+  const [logs, setLogs] = useState<UpdatedChargingLog[]>([]);
   const [totalSwapCount, setTotalSwapCount] = useState<number>(0);
   const [operationLoading, setOperationLoading] = useState(false);
   const [swappingLoading, setSwappingLoading] = useState(false);
@@ -371,17 +376,39 @@ export default function UserDashboard() {
     setError('');
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('charging_logs')
         .update({
           end_time: new Date().toISOString(),
+          stopped_by: profile.id  // Add the user who stopped the charging
         })
-        .eq('id', currentSession.id);
+        .eq('id', currentSession.id)
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (error) {
+        // If stopped_by column doesn't exist, try without it
+        if (error.message?.includes('stopped_by') || error.code === '42703') {
+          console.log('stopped_by column not found, updating without it');
+          const { error: fallbackError } = await supabase
+            .from('charging_logs')
+            .update({
+              end_time: new Date().toISOString(),
+            })
+            .eq('id', currentSession.id);
+          
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
 
       // Update local state immediately
       setCurrentSession(null);
+      
+      // Clear charging point selection and meter reading
+      setSelectedChargingPoint('');
+      setMeterReading('');
       
     } catch (err: any) {
       console.error('Error stopping charging:', err);

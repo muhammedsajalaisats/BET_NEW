@@ -43,6 +43,28 @@ export default function UserDashboard() {
   const [selectedChargingPoint, setSelectedChargingPoint] = useState<string>('');
   const [chargingPointsLoading, setChargingPointsLoading] = useState(false);
   const [meterReading, setMeterReading] = useState<string>('');
+  const [swapMeterReading, setSwapMeterReading] = useState<string>('');
+
+  // Function to validate and handle numeric input
+  const handleNumericInput = (value: string): string => {
+    // Remove all non-numeric characters except decimal point
+    const numericValue = value.replace(/[^\d.]/g, '');
+    
+    // Ensure only one decimal point
+    const parts = numericValue.split('.');
+    if (parts.length > 2) {
+      return parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    return numericValue;
+  };
+
+  // Function to validate if input contains only numbers and optional decimal
+  const isValidNumericInput = (value: string): boolean => {
+    // Allow empty string, numbers, and numbers with decimal point
+    if (value === '') return true;
+    return /^\d*\.?\d*$/.test(value);
+  };
 
   // Parse query parameters and handle equipment selection
   useEffect(() => {
@@ -289,6 +311,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(meterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     // Check if equipment already has an active session (safety check)
     await fetchCurrentSession();
     if (currentSession) {
@@ -374,12 +402,24 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate meter reading - MANDATORY
+    if (!swapMeterReading || swapMeterReading.trim() === '') {
+      setError('Please enter a meter reading before recording swap');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(swapMeterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     setSwappingLoading(true);
     setError('');
     setSwappingSuccess(null);
 
     try {
-      // Insert new swapping log with count = 1
+      // Insert new swapping log with count = 1 and meter reading
       const { error: insertError } = await supabase
         .from('swapping_log')
         .insert([{
@@ -387,11 +427,15 @@ export default function UserDashboard() {
           location_id: selectedEquipment.location_id,
           equipment_id: selectedEquipment.id,
           Count: '1',
+          Meter_reading: swapMeterReading,
         }]);
 
       if (insertError) throw insertError;
 
       setSwappingSuccess('Battery swap recorded successfully!');
+      
+      // Clear the meter reading input after successful swap
+      setSwapMeterReading('');
       
       // Clear success message after 3 seconds
       setTimeout(() => {
@@ -422,6 +466,12 @@ export default function UserDashboard() {
       return;
     }
 
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(meterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     setShowChargingConfirm(true);
   };
 
@@ -430,6 +480,18 @@ export default function UserDashboard() {
   };
 
   const handleRecordSwapClick = () => {
+    // Validate meter reading before showing confirmation
+    if (!swapMeterReading || swapMeterReading.trim() === '') {
+      setError('Please enter a meter reading before recording swap');
+      return;
+    }
+
+    // Validate that meter reading is a valid number
+    if (!isValidNumericInput(swapMeterReading)) {
+      setError('Meter reading must be a valid number');
+      return;
+    }
+
     setShowSwapConfirm(true);
   };
 
@@ -514,6 +576,7 @@ export default function UserDashboard() {
                   setCurrentSession(null); // Reset session when equipment changes
                   setSelectedChargingPoint(''); // Reset charging point when equipment changes
                   setMeterReading(''); // Reset meter reading when equipment changes
+                  setSwapMeterReading(''); // Reset swap meter reading when equipment changes
                   
                   // Update URL with equipment number
                   if (selected) {
@@ -610,13 +673,20 @@ export default function UserDashboard() {
                       type="text"
                       value={meterReading}
                       onChange={(e) => {
-                        setMeterReading(e.target.value);
+                        const numericValue = handleNumericInput(e.target.value);
+                        setMeterReading(numericValue);
                         setError(''); // Clear any previous errors
                       }}
                       placeholder="Enter meter reading"
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                       required
+                      inputMode="decimal"
+                      pattern="[0-9]*\.?[0-9]*"
+                      title="Please enter numbers only"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Enter numbers only (e.g., 1234 or 1234.5)
+                    </p>
                   </div>
                 </>
               )}
@@ -666,27 +736,50 @@ export default function UserDashboard() {
               )}
 
               {/* Battery Swapping Section */}
-              <div className="border-t border-gray-200 pt-6 mt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-md font-semibold text-gray-900 flex items-center gap-2">
+              {profile?.Swapping_Access && (
+                <div className="border-t border-gray-200 pt-6 mt-6">
+                  <div className="mb-4">
+                    <h4 className="text-md font-semibold text-gray-900 flex items-center gap-2 mb-3">
                       <Battery className="w-5 h-5 text-amber-600" />
                       Battery Swapping
                     </h4>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 mb-4">
                       Total swaps: {totalSwapCount}
                     </p>
+
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Meter Reading <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={swapMeterReading}
+                      onChange={(e) => {
+                        const numericValue = handleNumericInput(e.target.value);
+                        setSwapMeterReading(numericValue);
+                        setError(''); // Clear any previous errors
+                      }}
+                      placeholder="Enter meter reading"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white mb-4"
+                      required
+                      inputMode="decimal"
+                      pattern="[0-9]*\.?[0-9]*"
+                      title="Please enter numbers only"
+                    />
+                    <p className="text-xs text-gray-500 mb-4">
+                      Enter numbers only (e.g., 1234 or 1234.5)
+                    </p>
                   </div>
+
                   <button
                     onClick={handleRecordSwapClick}
-                    disabled={swappingLoading || !profile?.Swapping_Access}
-                    className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                    disabled={swappingLoading || !profile?.Swapping_Access || !swapMeterReading}
+                    className="w-full px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                   >
                     <RefreshCw className={`w-5 h-5 ${swappingLoading ? 'animate-spin' : ''}`} />
                     {swappingLoading ? 'Recording...' : 'Record Swap'}
                   </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>

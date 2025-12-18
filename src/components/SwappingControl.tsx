@@ -1,13 +1,26 @@
 import { useState, useEffect } from 'react';
 import { Search, MapPin, Download, RefreshCw } from 'lucide-react';
-import { supabase, SwappingLog, Location, UserProfile, BETRecord } from '../lib/supabase';
+import { supabase, Location, UserProfile, BETRecord } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 interface SwappingControlProps {
   locations: Location[];
 }
 
-interface SwappingLogWithJoins extends SwappingLog {
+// Extended SwappingLog type with all fields
+interface ExtendedSwappingLog {
+  id: number;
+  User_id: string;
+  equipment_id: string;
+  location_id: string;
+  Count: string | number;
+  Meter_reading: number | null;
+  Battery_Number: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SwappingLogWithJoins extends ExtendedSwappingLog {
   user_profiles?: UserProfile;
   bet_records?: BETRecord;
   locations?: Location;
@@ -128,6 +141,8 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
       user.email.toLowerCase().includes(search) ||
       getLocationName(log).toLowerCase().includes(search) ||
       (log.Count && log.Count.toString().includes(search)) ||
+      (log.Battery_Number && log.Battery_Number.toLowerCase().includes(search)) ||
+      (log.Meter_reading && log.Meter_reading.toString().includes(search)) ||
       log.id.toString().includes(search)
     );
   });
@@ -179,6 +194,8 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
         'User Email',
         'Location',
         'Swap Count',
+        'Meter Reading',
+        'Battery Number',
         'Created Date',
         'Created Time',
       ];
@@ -200,6 +217,8 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
           user.email,
           loc,
           log.Count || '0',
+          log.Meter_reading !== null && log.Meter_reading !== undefined ? log.Meter_reading.toString() : '',
+          log.Battery_Number || '',
           d.toLocaleDateString(),
           d.toLocaleTimeString(),
         ];
@@ -358,7 +377,7 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search by equipment, user, location, or count..."
+                  placeholder="Search by equipment, user, location, battery number..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -459,6 +478,12 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
                       Swap Count
                     </th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
+                      Meter Reading
+                    </th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
+                      Battery Number
+                    </th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
                       Date & Time
                     </th>
                   </tr>
@@ -490,6 +515,12 @@ export default function SwappingControl({ locations }: SwappingControlProps) {
                           <span className="inline-flex px-2.5 py-1 rounded-full text-sm font-semibold bg-purple-100 text-purple-800">
                             {log.Count || '0'}
                           </span>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600">
+                          {log.Meter_reading !== null && log.Meter_reading !== undefined ? log.Meter_reading : '-'}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600">
+                          {log.Battery_Number || '-'}
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-600">
                           {new Date(log.created_at).toLocaleString()}

@@ -334,6 +334,9 @@ export default function UserDashboard() {
     setError('');
 
     try {
+      // **FIXED**: Ensure Meter_reading is properly capitalized and trimmed
+      const meterReadingValue = meterReading.trim();
+      
       const { data, error } = await supabase
         .from('charging_logs')
         .insert([{
@@ -342,12 +345,17 @@ export default function UserDashboard() {
           location_id: selectedEquipment.location_id,
           start_time: new Date().toISOString(),
           charging_point_id: selectedChargingPoint,
-          Meter_reading: meterReading,
+          "Meter_reading": meterReadingValue, // Use exact column name with quotes for case sensitivity
         }])
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase insert error:', error);
+        throw error;
+      }
+
+      console.log('Charging session created:', data); // Debug log
 
       // Update local state immediately
       setCurrentSession(data);
@@ -453,6 +461,9 @@ export default function UserDashboard() {
     setSwappingSuccess(null);
 
     try {
+      // **FIXED**: Trim meter reading and use exact column name
+      const swapMeterReadingValue = swapMeterReading.trim();
+      
       // Insert new swapping log with count = 1, meter reading, and battery number
       const { error: insertError } = await supabase
         .from('swapping_log')
@@ -461,11 +472,14 @@ export default function UserDashboard() {
           location_id: selectedEquipment.location_id,
           equipment_id: selectedEquipment.id,
           Count: '1',
-          Meter_reading: swapMeterReading,
-          Battery_Number: batteryNumber,
+          "Meter_reading": swapMeterReadingValue, // Use exact column name with quotes
+          "Battery_Number": batteryNumber.trim(),
         }]);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Swapping insert error:', insertError);
+        throw insertError;
+      }
 
       setSwappingSuccess('Battery swap recorded successfully!');
       
@@ -774,6 +788,11 @@ export default function UserDashboard() {
                       {currentSession.user_id && (
                         <p className="text-xs text-blue-600 mt-1">
                           Started by: {currentSession.user_id === profile?.id ? 'You' : 'Another user'}
+                        </p>
+                      )}
+                      {currentSession.Meter_reading && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Initial Meter Reading: {currentSession.Meter_reading}
                         </p>
                       )}
                     </div>

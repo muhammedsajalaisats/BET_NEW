@@ -12,7 +12,7 @@ interface ExtendedChargingLog {
   charging_point_id: string | null;
   start_time: string;
   end_time: string | null;
-  meter_reading: number | null;
+  Meter_reading: string | null;
   stopped_by: string | null;
   created_at: string;
   updated_at: string;
@@ -223,7 +223,7 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
           new Date(log.start_time).toLocaleString(),
           log.end_time ? new Date(log.end_time).toLocaleString() : 'Active',
           duration.toString(),
-          log.meter_reading?.toString() || '',
+          log.Meter_reading?.toString() || '',
           log.stopped_by_profile?.full_name || '',
           log.end_time ? 'Completed' : 'Active',
           new Date(log.created_at).toLocaleString()
@@ -437,7 +437,7 @@ export default function ChargingRecordsTable({ locations }: ChargingRecordsTable
                       {formatDuration(log.start_time, log.end_time)}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
-                      {log.meter_reading !== null && log.meter_reading !== undefined ? log.meter_reading : '-'}
+                      {log.Meter_reading !== null && log.Meter_reading !== undefined ? log.Meter_reading : '-'}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       {log.stopped_by_profile?.full_name || '-'}

@@ -51,6 +51,8 @@ export interface ChargingLog {
   duration_minutes: number | null;
   created_at: string;
   updated_at: string;
+  Meter_reading?: string | null;  // Changed from number | null to string | null
+  charging_point_id?: string | null;
 }
 
 export interface SwappingLog {

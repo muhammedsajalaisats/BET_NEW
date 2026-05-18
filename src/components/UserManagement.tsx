@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, Location, UserProfile } from '../lib/supabase';
+import { supabase, supabaseAdmin, Location, UserProfile } from '../lib/supabase';
 import { Plus, X, UserPlus, Mail, MapPin, Shield, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import EditUserForm from './EditUserForm';
@@ -271,9 +271,13 @@ function AddUserForm({ locations, onClose, onSuccess }: AddUserFormProps) {
         throw new Error('You do not have permission to create users.');
       }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      // Use the admin client so no new browser session is created,
+      // which would otherwise log the admin out (Supabase signUp() behaviour
+      // when email confirmation is disabled).
+      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: formData.email,
         password: formData.password,
+        email_confirm: true, // mark as confirmed immediately
       });
 
       if (authError) throw authError;

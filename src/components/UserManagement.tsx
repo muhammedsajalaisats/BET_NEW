@@ -271,13 +271,12 @@ function AddUserForm({ locations, onClose, onSuccess }: AddUserFormProps) {
         throw new Error('You do not have permission to create users.');
       }
 
-      // Use the admin client so no new browser session is created,
-      // which would otherwise log the admin out (Supabase signUp() behaviour
-      // when email confirmation is disabled).
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      // Use the isolated secondary client (persistSession: false) so the new
+      // user's session is never written to localStorage. This prevents the
+      // main client's onAuthStateChange from firing and logging the admin out.
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
         email: formData.email,
         password: formData.password,
-        email_confirm: true, // mark as confirmed immediately
       });
 
       if (authError) throw authError;
